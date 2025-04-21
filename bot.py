@@ -102,20 +102,23 @@ from telegram.ext import (
     ConversationHandler,
 )
 from difflib import get_close_matches
-
-# from search import (
-#     get_token_contract_address_via_search,
-#     TokenNotFoundError,
-#     ContractAddressError,
-#     RETRY_DELAY,
-# )
+import asyncio
+from gemini_wrapper import GeminiWrapper
+from typing import Dict, List, Tuple
 
 # Загрузка переменных окружения
 load_dotenv()
-TOKEN = os.getenv('BOT_TOKEN')
+TOKEN = os.getenv('TG_BOT_TOKEN')
+
+# Настройка прокси для запросов
+proxies = {}
+if os.getenv('HTTP_PROXY'):
+    proxies['http'] = os.getenv('HTTP_PROXY')
+if os.getenv('HTTPS_PROXY'):
+    proxies['https'] = os.getenv('HTTPS_PROXY')
 
 # Загрузка поддерживаемых цепочек
-SUPPORTED_CHAINS = json.loads(open('supported_chains.json', encoding='utf-8').read())
+SUPPORTED_CHAINS = json.loads(open('data/supported_chains.json', encoding='utf-8').read())
 NATIVE_SYMBOL_TO_CHAIN = {
     entry['native_symbol'].lower(): entry['id']
     for entry in SUPPORTED_CHAINS
@@ -124,6 +127,77 @@ NATIVE_SYMBOL_TO_CHAIN = {
 CHAIN_IDS = [entry['id'] for entry in SUPPORTED_CHAINS]
 
 WAIT_TICKER, WAIT_CHAIN = range(2)
+
+# Инициализация Gemini
+gemini = GeminiWrapper(model="gemini-2.0-flash-lite")
+
+async def analyze_with_gemini_search(query: str) -> str:
+    """Анализ информации через Gemini с использованием Google Search"""
+    try:
+        return gemini.generate(query)
+    except Exception as e:
+        logging.error(f"Ошибка при запросе к Gemini с поиском: {e}")
+        return "Не удалось получить анализ"
+
+async def analyze_with_gemini(query: str) -> str:
+    """Стандартный анализ через Gemini без поиска"""
+    try:
+        return gemini.generate(query)
+    except Exception as e:
+        logging.error(f"Ошибка при запросе к Gemini: {e}")
+        return "Не удалось получить анализ"
+
+async def get_token_info(symbol: str) -> Dict:
+    """Получение информации о токене из CoinGecko"""
+    try:
+        platforms = get_token_contract_address_via_search(symbol)
+        return {
+            "platforms": platforms,
+            "symbol": symbol,
+        }
+    except Exception as e:
+        logging.error(f"Ошибка при получении информации о токене: {e}")
+        raise
+
+async def analyze_token(token_info: Dict) -> Tuple[List[str], str]:
+    """Комплексный анализ токена"""
+    symbol = token_info["symbol"]
+    
+    # Заглушка для бустинга (пока просто рандом)
+    boosting_result = random.choice(["Скам", "Не скам"])
+    
+    # Параллельный анализ через Gemini с поиском
+    queries = [
+        f"""Ты - эксперт по криптобезопасности. Проанализируй токен {symbol} cryptocurrency на scam. Analyze recent news and information. What are the red flags or suspicious activities related to {symbol} token? Analyze the legitimacy and trustworthiness of {symbol} cryptocurrency project. Выдай ответ в качестве анализа с указанием источников. Не пиши что ты AI и не можешь дать идеальный ответ, просто дай аналитику по новостям с источниками.""",
+    ]
+    
+    gemini_results = await asyncio.gather(
+        *[analyze_with_gemini_search(query) for query in queries]
+    )
+    print(gemini_results)
+    # Финальный анализ всех результатов (без поиска)
+    summary_prompt = (
+        f"На основе представленных данных составь ответ для пользователя о том является ли токен {symbol} "
+        f"скамом или нет:\n\n"
+        f"1. Результат алгоритмического анализа: {boosting_result}\n"
+        f"2. Результат анализа новостных данных: {gemini_results}"
+        f"Дай ответ в следующем формате:\n\n"
+        f"💡 ОСНОВНЫЕ ВЫВОДЫ:\n"
+        f"Пункт m\n"
+        f"⚠️ УРОВЕНЬ РИСКА:\n"
+        f"(Укажи уровень риска и обоснуй опираясь на источники)\n\n"
+        f"🎯 ВЕРДИКТ:\n"
+        f"(Четкое заключение)\n\n"
+        f"👉 РЕКОМЕНДАЦИИ:\n"
+        f"k) Рекомендация k\n"
+        f"Используй эмодзи для лучшей читаемости. Ответ должен быть на русском языке, "
+        f"четким и структурированным. Не используй специальные символы, "
+        f"такие как: _ * [ ] ( ) ~ ` > # + = | . !"
+    )
+    
+    final_analysis = await analyze_with_gemini(summary_prompt)
+    #print(final_analysis)
+    return gemini_results, final_analysis
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
@@ -135,35 +209,49 @@ async def handle_ticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     symbol = update.message.text.strip().upper()
     context.user_data['symbol'] = symbol
 
-    if symbol.lower() in NATIVE_SYMBOL_TO_CHAIN:
-        chain_id = NATIVE_SYMBOL_TO_CHAIN[symbol.lower()]
-        await update.message.reply_text(
-            f"Токен '{symbol}' является нативным для цепочки '{chain_id}'. Вероятность скама низкая."
-        )
-        return ConversationHandler.END
+    await update.message.reply_text("Анализирую токен, это может занять некоторое время...")
 
     try:
-        platforms = get_token_contract_address_via_search(symbol)
-    except TokenNotFoundError as e:
-        await update.message.reply_text(str(e))
-        return ConversationHandler.END
-    except ContractAddressError as e:
-        await update.message.reply_text(str(e))
-        return ConversationHandler.END
-    except Exception:
-        logging.exception("Unexpected error during token search")
-        await update.message.reply_text(
-            f"Произошла ошибка при запросе к CoinGecko. Пожалуйста, подождите {RETRY_DELAY} секунд и попробуйте снова."
+        # Получение информации о токене
+        token_info = await get_token_info(symbol)
+        
+        # Комплексный анализ
+        gemini_results, final_analysis = await analyze_token(token_info)
+        
+        # Экранируем все специальные символы для MarkdownV2
+        def escape_markdown(text: str) -> str:
+            """Экранирование специальных символов для MarkdownV2"""
+            chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+            for char in chars:
+                text = text.replace(char, f'\\{char}')
+            return text
+        
+        # Форматируем сообщение
+        message = (
+            f"🔍 *Анализ токена {escape_markdown(symbol)}*\n\n"
+            f"{escape_markdown(final_analysis)}"
         )
+        
+        # Разбиваем длинное сообщение
+        if len(message) > 4096:
+            parts = [message[i:i+4096] for i in range(0, len(message), 4096)]
+            for part in parts:
+                await update.message.reply_text(part, parse_mode='MarkdownV2')
+        else:
+            await update.message.reply_text(message, parse_mode='MarkdownV2')
+        
         return ConversationHandler.END
 
-    context.user_data['platforms'] = platforms
-    buttons = [[InlineKeyboardButton(cid, callback_data=cid)] for cid in platforms]
-    await update.message.reply_text(
-        f"Выберите сеть для {symbol}:",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    return WAIT_CHAIN
+    except TokenNotFoundError as e:
+        await update.message.reply_text(escape_markdown(str(e)), parse_mode='MarkdownV2')
+        return ConversationHandler.END
+    except Exception as e:
+        logging.exception("Unexpected error during analysis")
+        await update.message.reply_text(
+            escape_markdown("Произошла ошибка при анализе. Пожалуйста, попробуйте позже."),
+            parse_mode='MarkdownV2'
+        )
+        return ConversationHandler.END
 
 async def chain_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
