@@ -15,6 +15,10 @@ class ContractAddressError(Exception):
     """Raised when no contract address is available."""
     pass
 
+class NativeTokenError(Exception):
+    """Raised when token is native for blockchain."""
+    pass
+
 class CoinGeckoAPI:
     def __init__(self):
         self.session = requests.Session()
@@ -74,6 +78,16 @@ class CoinGeckoAPI:
                 )
                 response.raise_for_status()
                 data = response.json()
+                
+                # Проверка на нативный токен
+                if 'asset_platform_id' in data and data['asset_platform_id'] is None:
+                    chain_name = data.get('platforms', {}).get('', '')
+                    if chain_name:
+                        raise NativeTokenError(
+                            f"Токен '{data.get('symbol', '').upper()}' является нативным для цепочки '{chain_name}'. "
+                            f"Вероятность скама низкая."
+                        )
+                
                 platforms = {
                     chain: addr 
                     for chain, addr in data.get("platforms", {}).items() 

@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 from .config.settings import TG_BOT_TOKEN
 from .services.token_analyzer import TokenAnalyzer
-from .api.coingecko import TokenNotFoundError
+from .api.coingecko import TokenNotFoundError, NativeTokenError  # добавляем импорт
 
 WAIT_TICKER = 0
 
@@ -42,11 +42,38 @@ class ScamAnalyzerBot:
     @staticmethod
     def escape_markdown(text: str) -> str:
         """Экранирование специальных символов для MarkdownV2."""
-        chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', 
-                '-', '=', '|', '{', '}', '.', '!']
-        for char in chars:
-            text = text.replace(char, f'\\{char}')
-        return text
+        # Сохраняем форматирование для жирного текста
+        import re
+        
+        def escape_special_chars(text: str) -> str:
+            chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', 
+                    '-', '=', '|', '{', '}', '.', '!']
+            for char in chars:
+                text = text.replace(char, f'\\{char}')
+            return text
+        
+        # Находим все части текста между звездочками
+        parts = []
+        last_end = 0
+        
+        for match in re.finditer(r'\*(.*?)\*', text):
+            start, end = match.span()
+            
+            # Добавляем текст до звездочек
+            if start > last_end:
+                parts.append(escape_special_chars(text[last_end:start]))
+            
+            # Добавляем жирный текст
+            bold_content = escape_special_chars(match.group(1))
+            parts.append(f'*{bold_content}*')
+            
+            last_end = end
+        
+        # Добавляем оставшийся текст
+        if last_end < len(text):
+            parts.append(escape_special_chars(text[last_end:]))
+        
+        return ''.join(parts)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text(
@@ -90,6 +117,12 @@ class ScamAnalyzerBot:
             
             return ConversationHandler.END
 
+        except NativeTokenError as e:  # добавляем обработку новой ошибки
+            await update.message.reply_text(
+                self.escape_markdown(str(e)),
+                parse_mode='MarkdownV2'
+            )
+            return ConversationHandler.END
         except TokenNotFoundError as e:
             await update.message.reply_text(
                 self.escape_markdown(str(e)), 
