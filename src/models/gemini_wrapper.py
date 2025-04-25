@@ -8,7 +8,10 @@ class GeminiWrapper:
         self.model = model
         self.api_key = GEMINI_API_KEY
         self.api_url = f"{GEMINI_API_BASE}/models/{self.model}:generateContent"
-        self.proxies = PROXIES
+        if PROXIES["ENABLED"]:
+            self.proxies = PROXIES
+        else:
+            self.proxies = None
 
     def generate(self, prompt: str) -> str:
         try:

@@ -21,7 +21,8 @@ class TokenDataFetcher:
     def __init__(self):
         self.session = requests.Session()
         # Прокси, если указаны
-        self.session.proxies.update({k: v for k, v in PROXIES.items() if v})
+        if PROXIES["ENABLED"]:
+            self.session.proxies.update({k: v for k, v in PROXIES.items() if v})
         self.gecko_base = COINGECKO_API_BASE
         self.eth_key    = ETHERSCAN_API_KEY
         self.cache_file = CACHE_FILE
