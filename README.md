@@ -94,4 +94,4 @@ python main.py
 | Metric               | Score   |
 |----------------------|---------|
 | Prediction Accuracy  | 87.4%   |
-| Report Generation    | <2s     |
+| Report Generation    | <5s     |
