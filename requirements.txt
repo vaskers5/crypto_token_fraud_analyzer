@@ -1,0 +1,6 @@
+requests
+python-dotenv
+python-telegram-bot
+pandas
+scikit-learn
+xgboost
