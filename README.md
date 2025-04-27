@@ -9,6 +9,9 @@ CryptoTokenFraudAnalyzer is an intelligent Telegram bot that provides comprehens
 - **AI-powered insights** (Google Gemini)
 - **Machine learning risk scoring** (XGBoost)
 
+## 📽 Project Presentations
+- [Main Project Presentation](https://github.com/vaskers5/crypto_token_fraud_analyzer/blob/main/data/presentations/crypto_token_scam_analyzer_bot_presentation.pdf)
+
 ## ✨ Enhanced Key Features
 
 ### 🔬 Deep Token Analysis
